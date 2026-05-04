@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 256 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+
+    function isValidReview(data, animeId) {
+      return data.keys().hasAll(['animeId', 'userId', 'username', 'userPhoto', 'rating', 'text', 'createdAt', 'updatedAt']) 
+        && data.keys().size() == 8
+        && data.animeId == animeId
+        && data.userId == request.auth.uid
+        && data.username is string && data.username.size() <= 100
+        && data.userPhoto is string && data.userPhoto.size() <= 1000
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.text is string && data.text.size() <= 2000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /anime/{animeId} {
+      match /reviews/{reviewId} {
+        allow get: if true; 
+        allow list: if resource.data.animeId == animeId;
+
+        allow create: if isSignedIn() 
+          && isValidId(animeId)
+          && isValidId(reviewId)
+          && isValidReview(incoming(), animeId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isSignedIn()
+          && isValidReview(incoming(), animeId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'text', 'updatedAt'])
+          && incoming().updatedAt == request.time
+          && incoming().createdAt == existing().createdAt
+          && incoming().animeId == existing().animeId
+          && incoming().userId == existing().userId
+          && existing().userId == request.auth.uid;
+
+        allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+      }
+    }
+  }
+}

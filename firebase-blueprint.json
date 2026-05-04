@@ -1,0 +1,50 @@
+{
+  "entities": {
+    "Review": {
+      "title": "Review",
+      "description": "A user's review and rating for an anime.",
+      "type": "object",
+      "properties": {
+        "animeId": {
+          "type": "string",
+          "description": "ID of the anime being reviewed."
+        },
+        "userId": {
+          "type": "string",
+          "description": "ID of the user who wrote the review."
+        },
+        "username": {
+          "type": "string"
+        },
+        "userPhoto": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number",
+          "description": "Rating from 1 to 5."
+        },
+        "text": {
+          "type": "string",
+          "description": "The text of the review."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp of last update."
+        }
+      },
+      "required": ["animeId", "userId", "username", "rating", "text", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/anime/{animeId}/reviews/{reviewId}": {
+      "schema": {
+        "$ref": "#/entities/Review"
+      },
+      "description": "Stores user reviews for anime under each anime's subcollection."
+    }
+  }
+}
