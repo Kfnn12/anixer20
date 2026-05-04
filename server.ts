@@ -64,33 +64,35 @@ async function startServer() {
         headers["Range"] = req.headers.range as string;
       }
 
-      // Avoid double encoding if the URL is already encoded or has weird characters
       const fetchRes = await fetch(targetUrl, {
-        method: "GET",
+        method: req.method,
         headers,
         redirect: 'follow'
       });
 
-      if (!fetchRes.ok && fetchRes.status !== 206) {
-        return res.status(fetchRes.status).send(`Failed to fetch from target ${fetchRes.status}`);
-      }
+      // Forward status code (handle 206 for ranges)
+      res.status(fetchRes.status);
 
       // Important for Vercel and other proxies to not buffer the response
       res.setHeader("X-Accel-Buffering", "no");
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.setHeader("Access-Control-Allow-Origin", "*");
       
-      // Copy key headers back to client
+      // Copy key headers back to client, but EXCLUDE Access-Control and Content-Length for M3U8
       const headersToCopy = [
         "content-type",
-        "content-length",
         "content-range",
         "accept-ranges",
         "cache-control",
-        "access-control-allow-origin",
-        "access-control-allow-headers",
-        "access-control-expose-headers"
+        "expires",
+        "last-modified",
+        "etag"
       ];
+
+      // We handle content-length separately for non-m3u8 files
+      const contentType = fetchRes.headers.get("content-type") || "";
+      const isM3u8 = targetUrl.split('?')[0].toLowerCase().endsWith('.m3u8') || 
+                     contentType.includes('mpegurl') || 
+                     contentType.includes('application/x-mpegURL');
 
       fetchRes.headers.forEach((value, key) => {
         const lowerKey = key.toLowerCase();
@@ -99,19 +101,27 @@ async function startServer() {
         }
       });
 
-      // Always ensure CORS is open for our proxy
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      if (!isM3u8 && fetchRes.headers.has("content-length")) {
+        res.setHeader("Content-Length", fetchRes.headers.get("content-length")!);
+      }
 
-      res.status(fetchRes.status);
-      
-      const contentType = fetchRes.headers.get("content-type") || "";
-      const isM3u8 = targetUrl.includes('.m3u8') || contentType.includes('mpegurl') || contentType.includes('application/x-mpegURL');
+      // Always force CORS to be open
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      res.setHeader("Access-Control-Expose-Headers", "*");
+
+      if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+      }
+
+      if (!fetchRes.ok && fetchRes.status !== 206) {
+        const errText = await fetchRes.text();
+        return res.send(errText || `Failed to fetch from target ${fetchRes.status}`);
+      }
 
       if (isM3u8) {
-        const arrayBuffer = await fetchRes.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        let text = buffer.toString('utf-8');
-        const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+        const text = await fetchRes.text();
         
         const lines = text.split(/\r?\n/);
         const rewrittenLines = lines.map(line => {
@@ -119,21 +129,36 @@ async function startServer() {
           if (!trimmed) return line;
           
           if (trimmed.startsWith('#')) {
-            // Rewrite URI in tags like #EXT-X-KEY:METHOD=AES-128,URI="...",...
+            // Rewrite URI in tags like #EXT-X-KEY, #EXT-X-MAP, #EXT-X-MEDIA, etc.
             return line.replace(/URI="([^"]+)"/g, (match, uri) => {
-              const abs = uri.startsWith('http') ? uri : (uri.startsWith('/') ? new URL(targetUrl).origin + uri : baseUrl + uri);
-              return `URI="/api/proxy?url=${encodeURIComponent(abs)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}"`;
+              try {
+                const abs = new URL(uri, targetUrl).href;
+                let proxyUrl = `/api/proxy?url=${encodeURIComponent(abs)}`;
+                if (referer) proxyUrl += `&referer=${encodeURIComponent(referer)}`;
+                return `URI="${proxyUrl}"`;
+              } catch (e) {
+                return match;
+              }
             });
           }
           
-          const abs = trimmed.startsWith('http') ? trimmed : (trimmed.startsWith('/') ? new URL(targetUrl).origin + trimmed : baseUrl + trimmed);
-          return `/api/proxy?url=${encodeURIComponent(abs)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}`;
+          // Regular line (segment or sub-playlist URL)
+          try {
+            const abs = new URL(trimmed, targetUrl).href;
+            let proxyUrl = `/api/proxy?url=${encodeURIComponent(abs)}`;
+            if (referer) proxyUrl += `&referer=${encodeURIComponent(referer)}`;
+            return proxyUrl;
+          } catch (e) {
+            return line;
+          }
         });
 
-        res.send(rewrittenLines.join('\n'));
+        const output = rewrittenLines.join('\n');
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+        res.setHeader("Content-Length", Buffer.byteLength(output).toString());
+        res.send(output);
       } else {
         if (fetchRes.body) {
-           // For large segments, Vercel might have issues if we don't stream correctly
            const nodeBody = Readable.fromWeb(fetchRes.body as any);
            nodeBody.pipe(res);
            
