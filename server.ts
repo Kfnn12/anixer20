@@ -64,9 +64,11 @@ async function startServer() {
         headers["Range"] = req.headers.range as string;
       }
 
+      // Avoid double encoding if the URL is already encoded or has weird characters
       const fetchRes = await fetch(targetUrl, {
         method: "GET",
-        headers
+        headers,
+        redirect: 'follow'
       });
 
       if (!fetchRes.ok && fetchRes.status !== 206) {
@@ -76,65 +78,77 @@ async function startServer() {
       // Important for Vercel and other proxies to not buffer the response
       res.setHeader("X-Accel-Buffering", "no");
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Access-Control-Allow-Origin", "*");
       
-      // Copy over Accept-Ranges and Content-Range if present
-      if (fetchRes.headers.has("accept-ranges")) {
-        res.setHeader("Accept-Ranges", fetchRes.headers.get("accept-ranges")!);
-      }
-      if (fetchRes.headers.has("content-range")) {
-        res.setHeader("Content-Range", fetchRes.headers.get("content-range")!);
-      }
-      if (fetchRes.headers.has("content-length")) {
-        res.setHeader("Content-Length", fetchRes.headers.get("content-length")!);
-      }
+      // Copy key headers back to client
+      const headersToCopy = [
+        "content-type",
+        "content-length",
+        "content-range",
+        "accept-ranges",
+        "cache-control",
+        "access-control-allow-origin",
+        "access-control-allow-headers",
+        "access-control-expose-headers"
+      ];
 
-      // Pass along the content type (e.g., application/vnd.apple.mpegurl or video/MP2T)
-      const contentType = fetchRes.headers.get("content-type");
-      if (contentType) {
-        res.setHeader("Content-Type", contentType);
-      }
+      fetchRes.headers.forEach((value, key) => {
+        const lowerKey = key.toLowerCase();
+        if (headersToCopy.includes(lowerKey)) {
+          res.setHeader(key, value);
+        }
+      });
+
+      // Always ensure CORS is open for our proxy
+      res.setHeader("Access-Control-Allow-Origin", "*");
 
       res.status(fetchRes.status);
       
-      const isM3u8 = targetUrl.includes('.m3u8') || (contentType && contentType.includes('mpegurl'));
+      const contentType = fetchRes.headers.get("content-type") || "";
+      const isM3u8 = targetUrl.includes('.m3u8') || contentType.includes('mpegurl') || contentType.includes('application/x-mpegURL');
+
       if (isM3u8) {
         const arrayBuffer = await fetchRes.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         let text = buffer.toString('utf-8');
         const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
         
-        // Rewrite lines that aren't # or http to use the proxy
-        text = text.replace(/^(?!#|http)(.+)$/gm, (match) => {
-            const absoluteUrl = match.startsWith('/') 
-                ? new URL(targetUrl).origin + match
-                : baseUrl + match;
-            return `/api/proxy?url=${encodeURIComponent(absoluteUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}`;
+        const lines = text.split(/\r?\n/);
+        const rewrittenLines = lines.map(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return line;
+          
+          if (trimmed.startsWith('#')) {
+            // Rewrite URI in tags like #EXT-X-KEY:METHOD=AES-128,URI="...",...
+            return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+              const abs = uri.startsWith('http') ? uri : (uri.startsWith('/') ? new URL(targetUrl).origin + uri : baseUrl + uri);
+              return `URI="/api/proxy?url=${encodeURIComponent(abs)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}"`;
+            });
+          }
+          
+          const abs = trimmed.startsWith('http') ? trimmed : (trimmed.startsWith('/') ? new URL(targetUrl).origin + trimmed : baseUrl + trimmed);
+          return `/api/proxy?url=${encodeURIComponent(abs)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}`;
         });
 
-        // Rewrite lines that are completely absolute http to wrap in proxy (for segments)
-        text = text.replace(/^(http.+)$/gm, (match) => {
-            return `/api/proxy?url=${encodeURIComponent(match)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}`;
-        });
-
-        // Rewrite EXT-X URIs
-        text = text.replace(/URI="([^"]+)"/g, (match, uri) => {
-            const absoluteUrl = uri.startsWith('http') 
-              ? uri 
-              : (uri.startsWith('/') ? new URL(targetUrl).origin + uri : baseUrl + uri);
-            return `URI="/api/proxy?url=${encodeURIComponent(absoluteUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}"`;
-        });
-
-        res.send(text);
+        res.send(rewrittenLines.join('\n'));
       } else {
         if (fetchRes.body) {
-           Readable.fromWeb(fetchRes.body as any).pipe(res);
+           // For large segments, Vercel might have issues if we don't stream correctly
+           const nodeBody = Readable.fromWeb(fetchRes.body as any);
+           nodeBody.pipe(res);
+           
+           nodeBody.on('error', (err) => {
+             console.error('Proxy stream error:', err);
+             if (!res.headersSent) res.status(500).end();
+             else res.end();
+           });
         } else {
            res.end();
         }
       }
       
     } catch (e: any) {
-      console.error(e);
+      console.error('Proxy overall error:', e);
       if (!res.headersSent) {
         res.status(500).send("Proxy error: " + e.message);
       }
@@ -167,6 +181,6 @@ async function startServer() {
   return app;
 }
 
-const serverAppPromise = startServer();
-export default serverAppPromise; // Vercel can handle async exports or we can export the promise
+const app = await startServer();
+export default app;
 
