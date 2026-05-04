@@ -30,15 +30,30 @@ service cloud.firestore {
 
     function isValidWatchlistItem(data, userId, animeId) {
       return data.keys().hasAll(['userId', 'animeId', 'title', 'image', 'createdAt'])
-        && data.keys().size() >= 5 && data.keys().size() <= 6
+        && data.keys().size() >= 5 && data.keys().size() <= 8
         && data.userId == request.auth.uid
         && data.userId == userId
         && data.animeId == animeId
         && data.title is string && data.title.size() <= 200
         && data.image is string && data.image.size() <= 1000
         && data.createdAt is timestamp
-        // Optional type field
-        && (!('type' in data.keys()) || (data.type is string && data.type.size() <= 50));
+        // Optional fields
+        && (!('type' in data.keys()) || (data.type is string && data.type.size() <= 50))
+        && (!('latestEpisode' in data.keys()) || (data.latestEpisode is number))
+        && (!('lastCheckedAt' in data.keys()) || (data.lastCheckedAt is timestamp));
+    }
+
+    function isValidNotification(data, userId) {
+      return data.keys().hasAll(['userId', 'animeId', 'title', 'message', 'type', 'read', 'createdAt'])
+        && data.keys().size() == 7
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.animeId is string
+        && data.title is string && data.title.size() <= 200
+        && data.message is string && data.message.size() <= 500
+        && data.type is string && data.type.size() <= 50
+        && data.read is bool
+        && data.createdAt is timestamp;
     }
 
     function isValidWatchProgress(data, userId, animeId) {
@@ -59,6 +74,15 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      match /notifications/{notifId} {
+        allow get: if isSignedIn() && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn() && request.auth.uid == userId && isValidNotification(incoming(), userId);
+        allow update: if isSignedIn() && request.auth.uid == userId && isValidNotification(incoming(), userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+
       match /watchlist/{animeId} {
         allow get: if isSignedIn() && request.auth.uid == userId;
         allow list: if isSignedIn() && request.auth.uid == userId && resource.data.userId == userId;
@@ -68,6 +92,10 @@ service cloud.firestore {
           && isValidId(animeId)
           && isValidWatchlistItem(incoming(), userId, animeId)
           && incoming().createdAt == request.time;
+        
+        allow update: if isSignedIn() && request.auth.uid == userId
+          && isValidWatchlistItem(incoming(), userId, animeId)
+          && incoming().diff(existing()).affectedKeys().hasAny(['latestEpisode', 'lastCheckedAt']);
           
         allow delete: if isSignedIn() && request.auth.uid == userId && existing().userId == userId;
       }

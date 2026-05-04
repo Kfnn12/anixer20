@@ -2,6 +2,7 @@ import { Search, Menu, Home, Compass, User, X, LogOut, ChevronDown } from 'lucid
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../FirebaseProvider';
+import { NotificationCenter } from './NotificationCenter';
 
 const GENRES = [
   'Action', 'Adventure', 'Cars', 'Comedy', 'Dementia', 'Demons', 'Drama', 'Ecchi', 
@@ -94,6 +95,7 @@ export function Navbar() {
             
             {!loading && user ? (
               <div className="flex items-center gap-3">
+                <NotificationCenter />
                 <img src={user.photoURL || ''} alt="User avatar" className="h-8 w-8 rounded-full border border-[#1a1a1a]" />
                 <button 
                   onClick={logout}

@@ -339,6 +339,7 @@ export function Watch() {
         
         // Don't save if we watched the whole thing (e.g. >95%) to keep watchlist clean,
         // actually wait, let's keep it to say we finished the latest episode watched.
+        const currentEps = animeDetailsRef.current?.info?.stats?.episodes?.sub || animeDetailsRef.current?.info?.stats?.episodes?.dub || 0;
         setDoc(docRef, {
           userId: user.uid,
           animeId: id,
@@ -348,6 +349,8 @@ export function Watch() {
           episodeNumber: currentEp.number,
           currentTime: curTime,
           duration: dur,
+          latestEpisode: currentEps,
+          lastCheckedAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         }).catch(err => {
           handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/watchProgress/${id}`);

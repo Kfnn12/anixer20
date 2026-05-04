@@ -37,9 +37,46 @@
         }
       },
       "required": ["animeId", "userId", "username", "rating", "text", "createdAt", "updatedAt"]
+    },
+    "WatchlistItem": {
+      "title": "WatchlistItem",
+      "description": "An anime in the user's watchlist.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "animeId": { "type": "string" },
+        "title": { "type": "string" },
+        "image": { "type": "string" },
+        "type": { "type": "string" },
+        "latestEpisode": { "type": "number" },
+        "lastCheckedAt": { "type": "number" },
+        "createdAt": { "type": "number" }
+      }
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "A notification for the user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "animeId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      }
     }
   },
   "firestore": {
+    "/users/{userId}/watchlist/{animeId}": {
+      "schema": { "$ref": "#/entities/WatchlistItem" },
+      "description": "Stores user's bookmarked anime."
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Stores user notifications."
+    },
     "/anime/{animeId}/reviews/{reviewId}": {
       "schema": {
         "$ref": "#/entities/Review"

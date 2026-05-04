@@ -130,12 +130,15 @@ export function Details() {
         await deleteDoc(docRef);
         setIsInWatchlist(false);
       } else {
+        const currentEps = data.anime.info.stats.episodes.sub || data.anime.info.stats.episodes.dub || 0;
         await setDoc(docRef, {
           userId: user.uid,
           animeId: id,
           title: data.anime.info.name,
           image: data.anime.info.poster,
           type: data.anime.info.stats.type || '',
+          latestEpisode: currentEps,
+          lastCheckedAt: serverTimestamp(),
           createdAt: serverTimestamp()
         });
         setIsInWatchlist(true);

@@ -1,10 +1,24 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { Readable } from "stream";
 
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
+
+  // Enable CORS for all API routes
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Authorization, Range, Referer, User-Agent");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   // Agenda route (to bypass adblockers blocking "/schedule")
   app.get("/api/agenda", async (req, res) => {
@@ -21,7 +35,7 @@ async function startServer() {
   });
 
   // Proxy route
-  app.get("/api/proxy", async (req, res) => {
+  app.all("/api/proxy", async (req, res) => {
     const targetUrl = req.query.url as string;
     const referer = req.query.referer as string;
 
@@ -31,16 +45,23 @@ async function startServer() {
 
     try {
       const headers: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "keep-alive"
       };
 
       if (referer) {
         headers["Referer"] = referer;
-        headers["Origin"] = new URL(referer).origin;
+        try {
+          headers["Origin"] = new URL(referer).origin;
+        } catch (e) {
+          // ignore invalid referer for origin
+        }
       }
       
       if (req.headers.range) {
-        headers["Range"] = req.headers.range;
+        headers["Range"] = req.headers.range as string;
       }
 
       const fetchRes = await fetch(targetUrl, {
@@ -52,10 +73,9 @@ async function startServer() {
         return res.status(fetchRes.status).send(`Failed to fetch from target ${fetchRes.status}`);
       }
 
-      // Important: allow CORS for our client to read the proxied stream
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Range, User-Agent");
+      // Important for Vercel and other proxies to not buffer the response
+      res.setHeader("X-Accel-Buffering", "no");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       
       // Copy over Accept-Ranges and Content-Range if present
       if (fetchRes.headers.has("accept-ranges")) {
@@ -107,7 +127,6 @@ async function startServer() {
         res.send(text);
       } else {
         if (fetchRes.body) {
-           const { Readable } = await import('stream');
            Readable.fromWeb(fetchRes.body as any).pipe(res);
         } else {
            res.end();
@@ -116,7 +135,9 @@ async function startServer() {
       
     } catch (e: any) {
       console.error(e);
-      res.status(500).send("Proxy error: " + e.message);
+      if (!res.headersSent) {
+        res.status(500).send("Proxy error: " + e.message);
+      }
     }
   });
 
@@ -128,7 +149,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Note: Since this is for an AI studio app backend server, we don't necessarily need to implement the dist path exactly unless it builds, but the framework says "esbuild or similar" and "In Express v4, use app.get('*', ...)"
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -136,9 +156,17 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  // Only listen on port if not running in a serverless environment like Vercel
+  // Vercel handles the listening part themselves if we export the app
+  if (process.env.AIS_ENV || process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
+  
+  return app;
 }
 
-startServer();
+const serverAppPromise = startServer();
+export default serverAppPromise; // Vercel can handle async exports or we can export the promise
+
