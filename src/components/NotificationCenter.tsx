@@ -49,6 +49,7 @@ export function NotificationCenter() {
     // Real-time listener for notifications
     const q = query(
       collection(db, 'users', user.uid, 'notifications'),
+      where('userId', '==', user.uid),
       orderBy('createdAt', 'desc'),
       limit(20)
     );
@@ -80,8 +81,14 @@ export function NotificationCenter() {
     try {
       const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
       
-      const watchlistQuery = query(collection(db, 'users', user.uid, 'watchlist'));
-      const progressQuery = query(collection(db, 'users', user.uid, 'watchProgress'));
+      const watchlistQuery = query(
+        collection(db, 'users', user.uid, 'watchlist'), 
+        where('userId', '==', user.uid)
+      );
+      const progressQuery = query(
+        collection(db, 'users', user.uid, 'watchProgress'),
+        where('userId', '==', user.uid)
+      );
       
       const [watchlistSnap, progressSnap] = await Promise.all([
         getDocs(watchlistQuery),

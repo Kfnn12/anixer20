@@ -58,7 +58,7 @@ service cloud.firestore {
 
     function isValidWatchProgress(data, userId, animeId) {
       return data.keys().hasAll(['userId', 'animeId', 'title', 'image', 'episodeId', 'episodeNumber', 'currentTime', 'duration', 'updatedAt'])
-        && data.keys().size() >= 9 && data.keys().size() <= 10
+        && data.keys().size() >= 9 && data.keys().size() <= 13
         && data.userId == request.auth.uid
         && data.userId == userId
         && data.animeId == animeId
@@ -70,13 +70,15 @@ service cloud.firestore {
         && data.duration is number
         && data.updatedAt is timestamp
         // Optional type field
-        && (!('type' in data.keys()) || (data.type is string && data.type.size() <= 50));
+        && (!('type' in data.keys()) || (data.type is string && data.type.size() <= 50))
+        && (!('latestEpisode' in data.keys()) || (data.latestEpisode is number))
+        && (!('lastCheckedAt' in data.keys()) || (data.lastCheckedAt is timestamp));
     }
 
     match /users/{userId} {
       match /notifications/{notifId} {
         allow get: if isSignedIn() && request.auth.uid == userId;
-        allow list: if isSignedIn() && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId && resource.data.userId == request.auth.uid;
         allow create: if isSignedIn() && request.auth.uid == userId && isValidNotification(incoming(), userId);
         allow update: if isSignedIn() && request.auth.uid == userId && isValidNotification(incoming(), userId)
           && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
@@ -85,7 +87,7 @@ service cloud.firestore {
 
       match /watchlist/{animeId} {
         allow get: if isSignedIn() && request.auth.uid == userId;
-        allow list: if isSignedIn() && request.auth.uid == userId && resource.data.userId == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId && resource.data.userId == request.auth.uid;
         
         allow create: if isSignedIn()
           && isValidId(userId)
@@ -102,7 +104,7 @@ service cloud.firestore {
 
       match /watchProgress/{animeId} {
         allow get: if isSignedIn() && request.auth.uid == userId;
-        allow list: if isSignedIn() && request.auth.uid == userId && resource.data.userId == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId && resource.data.userId == request.auth.uid;
         
         allow create: if isSignedIn()
           && isValidId(userId)
@@ -114,8 +116,7 @@ service cloud.firestore {
           && request.auth.uid == userId
           && existing().userId == userId
           && isValidWatchProgress(incoming(), userId, animeId)
-          && incoming().diff(existing()).affectedKeys().hasOnly(['episodeId', 'episodeNumber', 'currentTime', 'duration', 'updatedAt'])
-          && incoming().updatedAt == request.time;
+          && incoming().diff(existing()).affectedKeys().hasOnly(['episodeId', 'episodeNumber', 'currentTime', 'duration', 'updatedAt', 'latestEpisode', 'lastCheckedAt'])
           
         allow delete: if isSignedIn() && request.auth.uid == userId && existing().userId == userId;
       }

@@ -1,14 +1,16 @@
+import fetch from "node-fetch";
+
 async function run() {
+  const url = "http://localhost:3000/api/proxy?url=" + encodeURIComponent("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8");
+  console.log("Fetching: " + url);
   try {
-    let url = 'https://xerv2.vercel.app/api/v2/animekai/home';
-    let res = await fetch(url);
-    console.log("home", res.status);
-    
-    url = 'https://xerv2.vercel.app/api/v2/animekai/anime/cardfight-vanguard-15th-anniv-remastered-e22jm/episodes';
-    res = await fetch(url);
-    console.log("episodes", res.status);
-  } catch(e) {
-    console.log(e);
+    const res = await fetch(url);
+    console.log("Status:", res.status);
+    console.log("Headers:", res.headers.raw());
+    const text = await res.text();
+    console.log("Body preview:", text.slice(0, 200));
+  } catch (err) {
+    console.error("Error:", err);
   }
 }
 run();

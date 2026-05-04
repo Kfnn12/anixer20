@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Readable } from "stream";
 
@@ -36,6 +35,16 @@ async function startServer() {
 
   // Proxy route
   app.all("/api/proxy", async (req, res) => {
+    // Always set CORS headers early
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
+    res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Origin, Accept, Referer, User-Agent, X-Requested-With");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+
     const targetUrl = req.query.url as string;
     const referer = req.query.referer as string;
 
@@ -105,22 +114,19 @@ async function startServer() {
         res.setHeader("Content-Length", fetchRes.headers.get("content-length")!);
       }
 
-      // Always force CORS to be open
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-      res.setHeader("Access-Control-Allow-Headers", "*");
-      res.setHeader("Access-Control-Expose-Headers", "*");
-
-      if (req.method === "OPTIONS") {
-        return res.sendStatus(200);
+      if (req.method === "HEAD") {
+        res.status(fetchRes.status);
+        return res.end();
       }
 
       if (!fetchRes.ok && fetchRes.status !== 206) {
         const errText = await fetchRes.text();
-        return res.send(errText || `Failed to fetch from target ${fetchRes.status}`);
+        return res.status(fetchRes.status).send(errText || `Failed to fetch from target ${fetchRes.status}`);
       }
 
       if (isM3u8) {
+        // Rewritten playlists must be 200
+        res.status(200);
         const text = await fetchRes.text();
         
         const lines = text.split(/\r?\n/);
@@ -182,6 +188,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -195,17 +202,10 @@ async function startServer() {
     });
   }
 
-  // Only listen on port if not running in a serverless environment like Vercel
-  // Vercel handles the listening part themselves if we export the app
-  if (process.env.AIS_ENV || process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
-  
-  return app;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
-const app = await startServer();
-export default app;
+startServer();
 
